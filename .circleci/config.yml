@@ -1,0 +1,181 @@
+version: 2.1
+
+executors:
+  go:
+    docker:
+      - image: circleci/golang:1.13.1
+    working_directory: /tmp/ahchain
+
+jobs:
+  build: # runs not using Workflows must have a `build` job as entry point
+    executor: go
+    parallelism: 2
+    steps: # steps that comprise the `build` job
+      - checkout # check out source code to working directory
+      - restore_cache: # restores saved cache if no changes are detected since last run
+          keys:
+            - go-mod-v3-{{ checksum "go.sum" }}
+      - run:
+          name: Install linter
+          command: |
+            GO111MODULE=on go get github.com/golangci/golangci-lint/cmd/golangci-lint@v1.18.0
+      - run: make download
+      - run: make check
+      - run: make build-linux
+      - run:
+          name: List built binaries
+          command: |
+            pwd
+            ls -l ./build/
+      - save_cache:
+          key: go-mod-v3-{{ checksum "go.sum" }}
+          paths:
+            - "/go/pkg/mod"
+          # Persist the specified paths (workspace/echo-output) into the workspace for use in downstream job.
+      - persist_to_workspace:
+          # Must be an absolute path, or relative path from working_directory. This is a directory on the container which is
+          # taken to be the root directory of the workspace.
+          root: build
+          # Must be relative path from root
+          paths:
+            - ahchaind
+            - ahchaincli
+  deploy:
+    executor: go
+    steps:
+      - add_ssh_keys:
+          fingerprints:
+            - '7a:fe:42:64:1d:e4:c0:1a:cc:aa:8c:5e:5e:e8:f8:03'
+      - attach_workspace:
+          at: /tmp/ahchain/build
+      - run:
+          name: List built binaries
+          command: |
+            pwd
+            ls -l ./build/
+      - run:
+          name: Deploy
+          command: |
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+                mkdir -p ~/.ssh
+                ssh-keyscan $BETA_HOST >> ~/.ssh/known_hosts
+                ssh $BETA_USER@$BETA_HOST "sudo systemctl stop ahchaind.service"
+                scp build/ahchaind "$BETA_USER@$BETA_HOST:/home/ubuntu/go/bin/ahchaind"
+                scp build/ahchaincli "$BETA_USER@$BETA_HOST:/home/ubuntu/go/bin/ahchaincli"
+                ssh $BETA_USER@$BETA_HOST "sudo systemctl start ahchaind.service"
+                echo "deploying to beta.trustory.io"
+            elif [ "${CIRCLE_BRANCH}" == "develop" ]
+            then
+                mkdir -p ~/.ssh
+                ssh-keyscan $DEVNET_HOST >> ~/.ssh/known_hosts
+                ssh $DEVNET_USER@$DEVNET_HOST "sudo systemctl stop ahchaind.service"
+                scp build/ahchaind "$DEVNET_USER@$DEVNET_HOST:/home/ubuntu/go/bin/ahchaind"
+                scp build/ahchaincli "$DEVNET_USER@$DEVNET_HOST:/home/ubuntu/go/bin/ahchaincli"
+                ssh $DEVNET_USER@$DEVNET_HOST "sudo systemctl start ahchaind.service"
+                echo "deployed to devnet"
+            fi
+  test_unit:
+    executor: go
+    parallelism: 2
+    steps:
+      - attach_workspace:
+          at: /tmp/workspace
+      - checkout
+      - restore_cache:
+          keys:
+            - go-mod-v1-{{ checksum "go.sum" }}
+      - run:
+          name: Run unit tests
+          command: |
+            make test_cover
+      - run:
+          name: Upload coverage report
+          command: |
+            bash <(curl -s https://codecov.io/bash)
+  data_dump:
+    executor: go
+    working_directory: /tmp/ahchaind
+    steps:
+      - add_ssh_keys:
+          fingerprints:
+            - '7a:fe:42:64:1d:e4:c0:1a:cc:aa:8c:5e:5e:e8:f8:03'
+      - attach_workspace:
+          at: /tmp/ahchaind/backups
+      - run:
+          name: Dump chain data
+          command: |
+            mkdir -p ~/.ssh
+            ssh-keyscan $BETA_HOST >> ~/.ssh/known_hosts
+            ssh $BETA_USER@$BETA_HOST "sudo systemctl stop ahchaind.service"
+            ssh $BETA_USER@$BETA_HOST "tar -zcvf .ahchaind.tar.gz .ahchaind"
+            ssh $BETA_USER@$BETA_HOST "sudo systemctl start ahchaind.service"
+            mkdir -p backups
+            scp "$BETA_USER@$BETA_HOST:/home/ubuntu/.ahchaind.tar.gz" "/tmp/ahchaind/backups/.ahchaind.tar.gz"
+            echo "Backed up chain data"
+      - persist_to_workspace:
+          root: backups
+          paths:
+            - .ahchaind.tar.gz
+  s3_upload:
+    docker:
+      - image: circleci/python:2.7-jessie
+    working_directory: /tmp/ahchaind
+    steps:
+      - attach_workspace:
+          at: /tmp/ahchaind/backups
+      - run:
+          name: List backups
+          command: |
+            pwd
+            ls -l ./backups/
+      - run:
+          name: Install awscli
+          command: sudo pip install awscli
+      - run:
+          name: Upload to S3
+          command: aws s3 cp ./backups/.ahchaind.tar.gz s3://io-trustory-backups/chain/$(date +%y%m%d%H).ahchaind.tar.gz
+
+workflows:
+  version: 2
+  deploy-flow:
+    jobs:
+      - build
+      - test_unit:
+          context: ahchain-context
+          requires:
+            - build
+      - data_dump:
+          filters:
+            branches:
+              only:
+                - master
+      - s3_upload:
+          requires:
+            - data_dump
+          filters:
+            branches:
+              only:
+                - master
+      - deploy:
+          requires:
+            - build
+            - test_unit
+          filters:
+            branches:
+              only:
+                - master
+                - develop
+  nightly-backup:
+    triggers:
+      - schedule:
+          # 4 am in PST 
+          cron: '0 11 * * *'
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - data_dump
+      - s3_upload:
+          requires:
+            - data_dump

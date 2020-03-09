@@ -1,0 +1,30 @@
+# Build
+bin/*
+
+# Testing
+coverage.txt
+mytestnet/*
+report.html
+.pid
+
+# Chain data
+exported_genesis.json
+genesis.json
+
+# Dependencies
+vendor/*
+node_modules/
+
+# Misc.
+.DS_Store
+.env
+.envrc
+web/
+*.bak
+
+
+.vscode
+build/
+.testnet/
+*.pyc
+.idea/

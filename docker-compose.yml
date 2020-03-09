@@ -1,0 +1,68 @@
+version: '3'
+
+services:
+  ahchaindnode0:
+    container_name: ahchaindnode0
+    image: "ahmedaly113/ahchaindnode"
+    ports:
+      - "26656-26657:26656-26657"
+    environment:
+      - ID=0
+      - LOG=${LOG:-ahchaind.log}
+    volumes:
+      - ./build:/ahchaind:Z
+    networks:
+      localnet:
+        ipv4_address: 192.168.10.2
+
+  ahchaindnode1:
+    container_name: ahchaindnode1
+    image: "ahmedaly113/ahchaindnode"
+    ports:
+      - "26659-26660:26656-26657"
+    environment:
+      - ID=1
+      - LOG=${LOG:-ahchaind.log}
+    volumes:
+      - ./build:/ahchaind:Z
+    networks:
+      localnet:
+        ipv4_address: 192.168.10.3
+
+  ahchaindnode2:
+    container_name: ahchaindnode2
+    image: "ahmedaly113/ahchaindnode"
+    environment:
+      - ID=2
+      - LOG=${LOG:-ahchaind.log}
+    ports:
+      - "26661-26662:26656-26657"
+    volumes:
+      - ./build:/ahchaind:Z
+    networks:
+      localnet:
+        ipv4_address: 192.168.10.4
+
+  ahchaindnode3:
+    container_name: ahchaindnode3
+    image: "ahmedaly113/ahchaindnode"
+    environment:
+      - ID=3
+      - LOG=${LOG:-ahchaind.log}
+    ports:
+      - "26663-26664:26656-26657"
+    volumes:
+      - ./build:/ahchaind:Z
+    networks:
+      localnet:
+        ipv4_address: 192.168.10.5
+
+networks:
+  localnet:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+      -
+        subnet: 192.168.10.0/16
+

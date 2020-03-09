@@ -1,0 +1,24 @@
+# Sets up systemd to start, stop, and restart the ahchaind daemon.
+# This should live in /etc/systemd/system on an Ubuntu instance.
+#
+# Use like so:
+# sudo systemctl start ahchaind.service
+# sudo systemctl stop ahchaind.service
+# sudo systemctl restart ahchaind.service
+#
+# Tail logs:
+# journalctl -u ahchaind.service -f
+
+[Unit]
+Description=Cosmos ahmedaly113 Node
+After=network-online.target
+
+[Service]
+User=ubuntu
+ExecStart=/home/ubuntu/go/bin/ahchaind --log_level "main:info,state:info,*:error,app:info,account:info,trubank2:info,claim:info,community:info,truslashing:info,trustaking:info" start
+Restart=always
+RestartSec=3
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
